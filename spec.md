@@ -1,35 +1,47 @@
-# Page Crafter — Invoice Table Edit, Delete, Print Fixes
+# GST Invoice Generator
 
 ## Current State
-- InvoiceGenerator.tsx has a working invoice layout with DynamicTable components
-- DynamicTable already has input fields per cell, Add Row button, and X delete button
-- However, the row delete button is `opacity-0` by default (only shows on hover), making it invisible/hard to use
-- No Print button exists; only PDF/PNG export via html2canvas
-- No `@media print` CSS exists for browser print
-- Amount column is readOnly (correct, auto-computed) but should be visually clear
-- GST label already correctly reads "GST (18%)" in TotalsSection
+Project is being built fresh. The previous versions had export/print issues and an overly complex canvas-based editor. This build starts clean with a focused, professional invoice generator.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Print button in the top bar of InvoiceGenerator: calls `window.print()`
-- `@media print` CSS in index.css for A4 layout:
-  - Hide sidebar, topbar, export controls, back button when printing
-  - Show only `#invoice-preview` at full width
-  - Set A4 page size (210mm x 297mm) with 15mm margins
-  - Ensure no overflow cut, scale-to-fit
-  - `page-break-inside: avoid` on tables
-- Print layout button icon: use `Printer` from lucide-react
+- Editable invoice header: Invoice Title, Invoice #, Date, Due Date
+- Company info section: Name, Address, Phone, Email, Logo upload
+- Customer/Bill-to section: Name, Address, Phone, Email
+- Dynamic item table: Item Name, Qty, Unit Price, Total (auto-calculated)
+- Add Row / Delete Row (per-row trash icon)
+- GST toggle (default ON, 18%) with label "GST 18%"
+- Manual adjustment field (+/- value)
+- Subtotal, GST amount, Adjustment, Grand Total summary section
+- Notes / Terms & Conditions textarea at bottom
+- Save Invoice button (localStorage)
+- Load Saved Invoices modal with timestamps
+- Download PDF button (html2pdf.js, full content, no blank pages)
+- Print Invoice button (window.print with @media print styles)
+- Dark / Light mode toggle
+- Reset / Clear invoice button
+- Input validation (no text in number fields, no negative qty/price)
+- Responsive layout for desktop and mobile
 
 ### Modify
-- DynamicTable.tsx: Remove `opacity-0 md:opacity-0` from the row delete button — make it always visible. Change icon from `X` to `Trash2` (trash bin). Optionally keep tooltip "Remove row".
-- DynamicTable.tsx: The row delete button should also be slightly larger for easier clicking (w-6 h-6)
-- DynamicTable.tsx: The Add Row button should be styled more prominently (border, padding, hover state)
+- N/A (new build)
 
 ### Remove
-- Nothing to remove
+- N/A (new build)
 
 ## Implementation Plan
-1. Edit `src/frontend/src/index.css` — add `@media print` rules for A4, hiding non-print elements, showing `#invoice-preview`
-2. Edit `src/frontend/src/components/invoice/DynamicTable.tsx` — make trash button always visible, use Trash2 icon
-3. Edit `src/frontend/src/pages/InvoiceGenerator.tsx` — add Print button in header using `Printer` icon from lucide-react
+1. Backend: Store saved invoices in Motoko stable storage (CRUD: save, list, load, delete)
+2. Frontend:
+   a. InvoiceHeader component (editable title, invoice#, dates)
+   b. CompanyInfo component (editable fields + logo upload)
+   c. CustomerInfo component (editable bill-to fields)
+   d. InvoiceTable component (dynamic rows, auto-calc per row)
+   e. TotalsSection component (subtotal, GST toggle, adjustment, grand total)
+   f. NotesSection component (textarea)
+   g. ActionBar (Save, Load, Download PDF, Print, Reset, Dark/Light toggle)
+   h. LoadModal (list saved invoices from backend, restore or delete)
+   i. PDF export via html2pdf.js — clone invoice div off-screen, remove UI chrome, export
+   j. Print via @media print — hide all except #invoice-print-area
+   k. Input validation utilities
+   l. Dark/Light mode via CSS class on root

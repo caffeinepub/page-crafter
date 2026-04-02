@@ -1,544 +1,1527 @@
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
-import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { useRouter } from "@tanstack/react-router";
 import {
-  ArrowLeft,
+  BarChart2,
   Download,
-  FileImage,
   FileText,
+  FolderOpen,
+  Home,
   Loader2,
-  Monitor,
+  Moon,
+  Pencil,
   Plus,
   Printer,
-  Settings2,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Settings,
+  Sun,
+  Trash2,
+  Users,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import DynamicTable, {
-  type Column,
-  type Row,
-  type TableData,
-} from "../components/invoice/DynamicTable";
-import InvoiceHeader, {
-  type HeaderData,
-} from "../components/invoice/InvoiceHeader";
 
-function generateId() {
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface InvoiceRow {
+  id: string;
+  item: string;
+  qty: number;
+  price: number;
+}
+
+interface InvoiceData {
+  title: string;
+  invoiceNumber: string;
+  date: string;
+  dueDate: string;
+  companyName: string;
+  companyAddress: string;
+  companyPhone: string;
+  companyEmail: string;
+  companyGSTIN: string;
+  companyLogo: string | null;
+  customerName: string;
+  customerAddress: string;
+  customerPhone: string;
+  customerEmail: string;
+  customerGSTIN: string;
+  rows: InvoiceRow[];
+  gstEnabled: boolean;
+  gstRate: number;
+  adjustment: number;
+  notes: string;
+  terms: string;
+}
+
+interface SavedEntry {
+  id: string;
+  savedAt: string;
+  data: InvoiceData;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function gid(): string {
   return Math.random().toString(36).slice(2, 9);
 }
 
-function makeDefaultTable(index: number): TableData {
-  const descId = generateId();
-  const qtyId = generateId();
-  const priceId = generateId();
-  const amtId = generateId();
-  const columns: Column[] = [
-    { id: descId, label: "Description", widthPx: 220, type: "text" },
-    { id: qtyId, label: "Qty", widthPx: 80, type: "number" },
-    { id: priceId, label: "Unit Price", widthPx: 120, type: "number" },
-    { id: amtId, label: "Amount", widthPx: 120, type: "number" },
-  ];
-  const rows: Row[] = [
-    {
-      id: generateId(),
-      cells: { [descId]: "", [qtyId]: "", [priceId]: "", [amtId]: "" },
-    },
-  ];
-  return {
-    id: generateId(),
-    title: index === 0 ? "Items" : `Table ${index + 1}`,
-    columns,
-    rows,
-  };
+const STORAGE_KEY = "gst_invoices_v2";
+
+function loadEntries(): SavedEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+  } catch {
+    return [];
+  }
 }
 
-const defaultHeader: HeaderData = {
-  companyName: "Your Company Name",
-  companyAddress: "123 Business Street\nCity, State - 500001",
-  companyGSTIN: "",
-  companyEmail: "",
-  companyPhone: "",
-  logoUrl: null,
-  customerName: "",
-  customerAddress: "",
-  customerGSTIN: "",
+function saveEntry(data: InvoiceData): SavedEntry {
+  const entries = loadEntries();
+  const entry: SavedEntry = {
+    id: gid(),
+    savedAt: new Date().toISOString(),
+    data,
+  };
+  const updated = [entry, ...entries].slice(0, 30);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  return entry;
+}
+
+function deleteEntry(id: string): void {
+  const updated = loadEntries().filter((e) => e.id !== id);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+}
+
+const INR = (n: number) =>
+  n.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+function parseNum(v: string): number {
+  const n = Number.parseFloat(v);
+  return Number.isNaN(n) ? 0 : Math.max(0, n);
+}
+
+function parseAdjust(v: string): number {
+  const n = Number.parseFloat(v);
+  return Number.isNaN(n) ? 0 : n;
+}
+
+const defaultData: InvoiceData = {
+  title: "TAX INVOICE",
   invoiceNumber: "INV-0001",
-  invoiceDate: new Date().toISOString().split("T")[0],
+  date: new Date().toISOString().split("T")[0],
   dueDate: "",
-  currency: "INR",
+  companyName: "Sunrise Enterprises",
+  companyAddress: "12, MG Road, Banjara Hills\nHyderabad, Telangana - 500034",
+  companyPhone: "+91 40 2345 6789",
+  companyEmail: "billing@sunriseenterprises.in",
+  companyGSTIN: "36AABCU9603R1ZX",
+  companyLogo: null,
+  customerName: "Horizon Technologies Pvt. Ltd.",
+  customerAddress: "Plot 8, HITEC City\nHyderabad, Telangana - 500081",
+  customerPhone: "+91 40 6789 0123",
+  customerEmail: "accounts@horizontech.in",
+  customerGSTIN: "36AABCH1234P1ZY",
+  rows: [
+    { id: gid(), item: "Web Development Services", qty: 1, price: 45000 },
+    { id: gid(), item: "UI/UX Design Package", qty: 2, price: 12500 },
+    { id: gid(), item: "SEO Optimization", qty: 3, price: 8000 },
+    { id: gid(), item: "Cloud Hosting (Annual)", qty: 1, price: 18000 },
+  ],
+  gstEnabled: true,
+  gstRate: 18,
+  adjustment: 0,
+  notes:
+    "Payment is due within 30 days. Please include the invoice number on your payment.",
+  terms:
+    "1. All prices are in Indian Rupees (INR).\n2. Goods once sold will not be taken back.\n3. Subject to Hyderabad jurisdiction.",
 };
 
-function computeSubtotal(tables: TableData[]): number {
-  let total = 0;
-  for (const table of tables) {
-    const amtCol = table.columns.find(
-      (c) => c.label.toLowerCase() === "amount",
-    );
-    const qtyCol = table.columns.find(
-      (c) =>
-        c.label.toLowerCase() === "qty" || c.label.toLowerCase() === "quantity",
-    );
-    const priceCol = table.columns.find(
-      (c) =>
-        c.label.toLowerCase() === "unit price" ||
-        c.label.toLowerCase() === "price" ||
-        c.label.toLowerCase() === "rate",
-    );
-    for (const row of table.rows) {
-      if (qtyCol && priceCol) {
-        const qty = Number.parseFloat(row.cells[qtyCol.id] || "0");
-        const price = Number.parseFloat(row.cells[priceCol.id] || "0");
-        if (!Number.isNaN(qty) && !Number.isNaN(price)) total += qty * price;
-      } else if (amtCol) {
-        const amt = Number.parseFloat(row.cells[amtCol.id] || "0");
-        if (!Number.isNaN(amt)) total += amt;
-      }
-    }
-  }
-  return total;
-}
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
-function TotalsSection({ subtotal }: { subtotal: number }) {
-  const gst = subtotal * 0.18;
-  const grandTotal = subtotal + gst;
-  const fmt = (n: number) =>
-    n.toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+function EditableText({
+  value,
+  onChange,
+  placeholder,
+  className = "",
+  multiline = false,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  className?: string;
+  multiline?: boolean;
+}) {
+  if (multiline) {
+    return (
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={2}
+        className={`w-full bg-transparent resize-none outline-none border-b border-transparent focus:border-blue-300 placeholder-gray-300 transition-colors leading-relaxed ${className}`}
+      />
+    );
+  }
   return (
-    <div className="flex justify-end mt-6 mb-6">
-      <div className="w-72">
-        <div className="flex justify-between text-sm text-gray-700 py-1.5">
-          <span className="text-gray-500">Subtotal</span>
-          <span className="font-medium">₹{fmt(subtotal)}</span>
-        </div>
-        <div className="flex justify-between text-sm text-gray-700 py-1.5">
-          <span className="text-gray-500">GST (18%)</span>
-          <span className="font-medium">₹{fmt(gst)}</span>
-        </div>
-        <Separator className="my-1.5" />
-        <div className="flex justify-between text-base font-bold text-gray-900 py-1.5">
-          <span>Grand Total</span>
-          <span>₹{fmt(grandTotal)}</span>
-        </div>
-      </div>
-    </div>
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className={`w-full bg-transparent outline-none border-b border-transparent focus:border-blue-300 placeholder-gray-300 transition-colors ${className}`}
+    />
   );
 }
 
-type Resolution = "720p" | "1080p" | "4k";
-type PageSize = "a4" | "letter";
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function InvoiceGenerator() {
   const router = useRouter();
-  const [invoiceTitle, setInvoiceTitle] = useState("New Invoice");
-  const [header, setHeader] = useState<HeaderData>(defaultHeader);
-  const [tables, setTables] = useState<TableData[]>([makeDefaultTable(0)]);
-  const [notes, setNotes] = useState("");
-  const [exportFormat, setExportFormat] = useState<"pdf" | "png">("pdf");
-  const [exportResolution, setExportResolution] = useState<Resolution>("1080p");
-  const [exportPageSize, setExportPageSize] = useState<PageSize>("a4");
+  const [invoice, setInvoice] = useState<InvoiceData>(defaultData);
+  const [darkMode, setDarkMode] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [showMobileSidebar, setShowMobileSidebar] = useState(false);
+  const [showLoadModal, setShowLoadModal] = useState(false);
+  const [entries, setEntries] = useState<SavedEntry[]>(loadEntries);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [activeNav, setActiveNav] = useState<"invoice" | "saved" | "settings">(
+    "invoice",
+  );
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const printAreaRef = useRef<HTMLDivElement>(null);
 
-  const subtotal = computeSubtotal(tables);
-  const gst = subtotal * 0.18;
-  const grandTotal = subtotal + gst;
+  // Dark mode class on html element
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+    return () => {
+      document.documentElement.classList.remove("dark");
+    };
+  }, [darkMode]);
 
-  const fmt = (n: number) =>
-    n.toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+  // Focus title input when editing
+  useEffect(() => {
+    if (editingTitle) titleInputRef.current?.focus();
+  }, [editingTitle]);
+
+  // Inject print styles
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.id = "inv-print-css";
+    style.textContent = `
+      @media print {
+        body > *:not(#inv-print-portal) { display: none !important; }
+        #inv-print-portal { display: block !important; }
+        #inv-print-area { width: 794px !important; box-shadow: none !important; background: white !important; }
+        .no-print { display: none !important; }
+        @page { size: A4 portrait; margin: 12mm; }
+      }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      document.getElementById("inv-print-css")?.remove();
+    };
+  }, []);
+
+  // ── Calculations (on every render) ────────────────────────────────────────
+  const subtotal = invoice.rows.reduce((s, r) => s + r.qty * r.price, 0);
+  const gstAmount = invoice.gstEnabled ? subtotal * (invoice.gstRate / 100) : 0;
+  const grandTotal = subtotal + gstAmount + invoice.adjustment;
+
+  // ── State updaters ─────────────────────────────────────────────────────────
+  const setField = <K extends keyof InvoiceData>(
+    key: K,
+    value: InvoiceData[K],
+  ) => setInvoice((prev) => ({ ...prev, [key]: value }));
+
+  const updateRow = (id: string, key: keyof InvoiceRow, raw: string) => {
+    setInvoice((prev) => ({
+      ...prev,
+      rows: prev.rows.map((r) => {
+        if (r.id !== id) return r;
+        if (key === "item") return { ...r, item: raw };
+        if (key === "qty") return { ...r, qty: parseNum(raw) };
+        if (key === "price") return { ...r, price: parseNum(raw) };
+        return r;
+      }),
+    }));
+  };
+
+  const addRow = () => {
+    const newRow: InvoiceRow = { id: gid(), item: "", qty: 1, price: 0 };
+    setInvoice((prev) => ({ ...prev, rows: [...prev.rows, newRow] }));
+    setTimeout(() => {
+      const rows = document.querySelectorAll<HTMLInputElement>(".item-input");
+      rows[rows.length - 1]?.focus();
+    }, 40);
+  };
+
+  const deleteRow = (id: string) => {
+    setInvoice((prev) => ({
+      ...prev,
+      rows: prev.rows.filter((r) => r.id !== id),
+    }));
+  };
+
+  // ── Logo upload ────────────────────────────────────────────────────────────
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) =>
+      setField("companyLogo", ev.target?.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  // ── Save / Load ────────────────────────────────────────────────────────────
+  const handleSave = () => {
+    saveEntry(invoice);
+    setEntries(loadEntries());
+    toast.success("Invoice saved!");
+  };
+
+  const handleLoad = (entry: SavedEntry) => {
+    setInvoice(entry.data);
+    setShowLoadModal(false);
+    toast.success("Invoice loaded!");
+  };
+
+  const handleDeleteEntry = (id: string) => {
+    deleteEntry(id);
+    setEntries(loadEntries());
+    toast.success("Deleted");
+  };
+
+  // ── Reset ──────────────────────────────────────────────────────────────────
+  const handleReset = () => {
+    setInvoice({
+      ...defaultData,
+      rows: [{ id: gid(), item: "", qty: 1, price: 0 }],
+      invoiceNumber: `INV-${String(Date.now()).slice(-4)}`,
+      date: new Date().toISOString().split("T")[0],
+      notes: "",
+      terms: "",
+      companyLogo: null,
+      adjustment: 0,
     });
-
-  const addTable = () => {
-    setTables((prev) => [...prev, makeDefaultTable(prev.length)]);
+    toast.success("Invoice reset");
   };
 
-  const removeTable = (id: string) => {
-    setTables((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  const updateTable = (id: string, updated: TableData) => {
-    setTables((prev) => prev.map((t) => (t.id === id ? updated : t)));
-  };
-
-  const handleExport = async () => {
-    const el = document.getElementById("invoice-preview");
+  // ── PDF Export ─────────────────────────────────────────────────────────────
+  const handleDownloadPDF = async () => {
+    const el = document.getElementById("inv-print-area");
     if (!el) {
-      toast.error("Preview element not found");
+      toast.error("Invoice area not found");
       return;
     }
     setIsExporting(true);
-    toast.loading("Generating export…", { id: "export" });
+    toast.loading("Generating PDF…", { id: "pdf" });
+
+    const wrapper = document.createElement("div");
+    wrapper.style.cssText =
+      "position:fixed;top:-9999px;left:-9999px;width:794px;background:white;padding:40px;z-index:-1;";
+    const clone = el.cloneNode(true) as HTMLElement;
+    clone.style.cssText =
+      "width:714px;background:white;overflow:visible;height:auto;box-shadow:none;";
+    for (const n of Array.from(clone.querySelectorAll(".no-print"))) n.remove();
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+
     try {
-      const scaleMap: Record<Resolution, number> = {
-        "720p": 1.5,
-        "1080p": 2,
-        "4k": 4,
-      };
-      const scale = scaleMap[exportResolution];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const canvas = await (window as any).html2canvas(el, {
-        scale,
+      const canvas = await (window as any).html2canvas(wrapper, {
+        scale: 2,
         useCORS: true,
         logging: false,
         backgroundColor: "#ffffff",
-        width: el.scrollWidth,
-        height: el.scrollHeight,
-        windowWidth: el.scrollWidth,
+        width: 794,
+        height: wrapper.scrollHeight,
+        windowWidth: 794,
       });
 
-      if (exportFormat === "png") {
-        const url = canvas.toDataURL("image/png");
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${invoiceTitle.replace(/\s+/g, "-")}.png`;
-        a.click();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { jsPDF } = (window as any).jspdf;
+      const pdf = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const margin = 12;
+      const pw = pageW - margin * 2;
+      const ph = pageH - margin * 2;
+      const imgW = pw;
+      const imgH = (canvas.height / canvas.width) * imgW;
+      const imgData = canvas.toDataURL("image/jpeg", 0.98);
+
+      if (imgH <= ph) {
+        pdf.addImage(imgData, "JPEG", margin, margin, imgW, imgH);
       } else {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { jsPDF } = (window as any).jspdf;
-        const pdf = new jsPDF({
-          orientation: "p",
-          unit: "mm",
-          format: exportPageSize === "a4" ? "a4" : "letter",
-        });
-        const imgData = canvas.toDataURL("image/jpeg", 1.0);
-        const pdfW = pdf.internal.pageSize.getWidth();
-        const pdfH = (canvas.height / canvas.width) * pdfW;
-        pdf.addImage(imgData, "JPEG", 0, 0, pdfW, pdfH);
-        pdf.save(`${invoiceTitle.replace(/\s+/g, "-")}.pdf`);
+        const totalPages = Math.ceil(imgH / ph);
+        for (let p = 0; p < totalPages; p++) {
+          if (p > 0) pdf.addPage();
+          const srcY = (p * ph * canvas.width) / imgW;
+          const srcH = Math.min(
+            (ph * canvas.width) / imgW,
+            canvas.height - srcY,
+          );
+          const pc = document.createElement("canvas");
+          pc.width = canvas.width;
+          pc.height = srcH;
+          const ctx = pc.getContext("2d");
+          if (ctx)
+            ctx.drawImage(
+              canvas,
+              0,
+              srcY,
+              canvas.width,
+              srcH,
+              0,
+              0,
+              canvas.width,
+              srcH,
+            );
+          const sliceH = (srcH / canvas.width) * imgW;
+          pdf.addImage(
+            pc.toDataURL("image/jpeg", 0.98),
+            "JPEG",
+            margin,
+            margin,
+            imgW,
+            sliceH,
+          );
+        }
       }
-      toast.success("Export complete!", { id: "export" });
+      pdf.save(
+        `${invoice.title.replace(/\s+/g, "-")}-${invoice.invoiceNumber}.pdf`,
+      );
+      toast.success("PDF downloaded!", { id: "pdf" });
     } catch (e) {
       console.error(e);
-      toast.error("Export failed. Please try again.", { id: "export" });
+      toast.error("Export failed", { id: "pdf" });
     } finally {
+      document.body.removeChild(wrapper);
       setIsExporting(false);
     }
   };
 
-  const resolutionLabels: Resolution[] = ["720p", "1080p", "4k"];
+  // ── Print ──────────────────────────────────────────────────────────────────
+  const handlePrint = () => {
+    const el = document.getElementById("inv-print-area");
+    if (!el) {
+      toast.error("Invoice area not found");
+      return;
+    }
 
-  const ExportSidebarContent = () => (
-    <>
-      {/* Export Settings */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-4">
-          <Settings2 className="w-4 h-4" /> Export Settings
-        </h3>
-        <div className="space-y-4">
-          {/* Format */}
-          <div>
-            <span className="text-xs text-gray-500 font-medium block mb-2">
-              Format
-            </span>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                data-ocid="invoice.format_pdf_toggle"
-                onClick={() => setExportFormat("pdf")}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded border text-sm transition-colors ${
-                  exportFormat === "pdf"
-                    ? "border-blue-500 bg-blue-50 text-blue-700 font-medium"
-                    : "border-gray-200 text-gray-600 hover:border-gray-300"
-                }`}
-              >
-                <FileText className="w-3.5 h-3.5" /> PDF
-              </button>
-              <button
-                type="button"
-                data-ocid="invoice.format_png_toggle"
-                onClick={() => setExportFormat("png")}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded border text-sm transition-colors ${
-                  exportFormat === "png"
-                    ? "border-blue-500 bg-blue-50 text-blue-700 font-medium"
-                    : "border-gray-200 text-gray-600 hover:border-gray-300"
-                }`}
-              >
-                <FileImage className="w-3.5 h-3.5" /> PNG
-              </button>
-            </div>
-          </div>
+    let portal = document.getElementById("inv-print-portal");
+    if (!portal) {
+      portal = document.createElement("div");
+      portal.id = "inv-print-portal";
+      portal.style.display = "none";
+      document.body.appendChild(portal);
+    }
+    const clone = el.cloneNode(true) as HTMLElement;
+    clone.id = "inv-print-area";
+    clone.style.cssText =
+      "width:794px;background:white;overflow:visible;height:auto;box-shadow:none;padding:0;";
+    for (const n of Array.from(clone.querySelectorAll(".no-print"))) n.remove();
+    portal.innerHTML = "";
+    portal.appendChild(clone);
+    portal.style.display = "block";
 
-          {/* Resolution */}
-          <div>
-            <span className="text-xs text-gray-500 font-medium block mb-2">
-              Resolution
-            </span>
-            <div className="flex gap-1">
-              {resolutionLabels.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  data-ocid={`invoice.resolution_${r}_toggle`}
-                  onClick={() => setExportResolution(r)}
-                  className={`flex-1 py-1.5 rounded border text-xs font-medium transition-colors ${
-                    exportResolution === r
-                      ? "border-blue-500 bg-blue-50 text-blue-700"
-                      : "border-gray-200 text-gray-600 hover:border-gray-300"
-                  }`}
-                >
-                  {r === "4k" ? "4K" : r}
-                </button>
-              ))}
-            </div>
-          </div>
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => {
+        if (portal) portal.style.display = "none";
+      }, 1000);
+    }, 400);
+  };
 
-          {/* Page Size */}
-          <div>
-            <span className="text-xs text-gray-500 font-medium block mb-2">
-              Page Size
-            </span>
-            <div className="flex gap-2">
-              {(["a4", "letter"] as PageSize[]).map((ps) => (
-                <button
-                  key={ps}
-                  type="button"
-                  data-ocid={`invoice.pagesize_${ps}_toggle`}
-                  onClick={() => setExportPageSize(ps)}
-                  className={`flex-1 py-1.5 rounded border text-xs font-medium transition-colors ${
-                    exportPageSize === ps
-                      ? "border-blue-500 bg-blue-50 text-blue-700"
-                      : "border-gray-200 text-gray-600 hover:border-gray-300"
-                  }`}
-                >
-                  {ps === "a4" ? "A4" : "Letter"}
-                </button>
-              ))}
-            </div>
-          </div>
+  // ── Nav click ─────────────────────────────────────────────────────────────
+  const handleNavClick = (item: typeof activeNav) => {
+    setActiveNav(item);
+    if (item === "saved") {
+      setEntries(loadEntries());
+      setShowLoadModal(true);
+    }
+  };
 
-          <Button
-            onClick={handleExport}
-            disabled={isExporting}
-            data-ocid="invoice.sidebar_export_button"
-            className="w-full gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            {isExporting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Download className="w-4 h-4" />
-            )}
-            Export {exportFormat.toUpperCase()}
-          </Button>
-        </div>
-      </div>
+  const navItems = [
+    { id: "invoice" as const, icon: FileText, label: "Invoice" },
+    { id: "saved" as const, icon: FolderOpen, label: "Saved" },
+    { id: "settings" as const, icon: Settings, label: "Settings" },
+  ];
 
-      <Separator />
-
-      {/* Tables list */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Tables</h3>
-        <div className="space-y-1 mb-3">
-          {tables.map((t, i) => (
-            <div
-              key={t.id}
-              className="flex items-center justify-between text-xs text-gray-600 py-1 px-2 rounded hover:bg-gray-50"
-            >
-              <span className="truncate">{t.title || `Table ${i + 1}`}</span>
-              <button
-                type="button"
-                onClick={() => removeTable(t.id)}
-                className="text-gray-400 hover:text-red-500 ml-2 flex-shrink-0 transition-colors"
-                title="Remove table"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-        <button
-          type="button"
-          onClick={addTable}
-          data-ocid="invoice.sidebar_add_table_button"
-          className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 transition-colors"
-        >
-          <Plus className="w-3 h-3" /> Add Table
-        </button>
-      </div>
-
-      <Separator />
-
-      {/* Summary */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Summary</h3>
-        <div className="space-y-2 text-xs text-gray-600">
-          <div className="flex justify-between">
-            <span className="text-gray-500">Subtotal</span>
-            <span className="font-medium">₹{fmt(subtotal)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-500">GST (18%)</span>
-            <span className="font-medium">₹{fmt(gst)}</span>
-          </div>
-          <div className="flex justify-between font-semibold text-gray-800 border-t border-gray-100 pt-2 mt-1">
-            <span>Grand Total</span>
-            <span>₹{fmt(grandTotal)}</span>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-
+  // ─── JSX ──────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Top Bar */}
-      <header className="bg-white border-b border-gray-200 h-14 flex items-center px-4 sticky top-0 z-20 gap-3">
+    <div
+      className="min-h-screen flex flex-col"
+      style={{ background: darkMode ? "#111827" : "#F3F6FA" }}
+    >
+      {/* ── Top Header ── */}
+      <header
+        className="no-print h-14 flex items-center px-6 sticky top-0 z-30 gap-4"
+        style={{
+          background: "linear-gradient(135deg, #0B1F3A 0%, #0A2A55 100%)",
+        }}
+      >
         <button
           type="button"
-          data-ocid="invoice.back_button"
           onClick={() => router.navigate({ to: "/" })}
-          className="p-1.5 rounded hover:bg-gray-100 transition-colors text-gray-600"
+          className="flex items-center gap-2.5 flex-shrink-0 group"
+          data-ocid="invoice.back_button"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <div className="w-7 h-7 bg-white/10 rounded-md flex items-center justify-center group-hover:bg-white/20 transition-colors">
+            <FileText className="w-4 h-4 text-white" />
+          </div>
+          <span className="text-white font-bold text-base tracking-tight hidden sm:block">
+            GST Invoice Pro
+          </span>
         </button>
-        <div className="h-5 w-px bg-gray-200" />
-        <input
-          type="text"
-          value={invoiceTitle}
-          onChange={(e) => setInvoiceTitle(e.target.value)}
-          data-ocid="invoice.title_input"
-          className="text-base font-semibold text-gray-800 bg-transparent border-0 border-b border-transparent focus:border-gray-300 outline-none min-w-32"
-        />
-        <div className="ml-auto flex items-center gap-2">
+
+        <div className="flex-1" />
+
+        <div className="flex items-center gap-3">
+          {/* Dark mode toggle */}
           <button
             type="button"
-            onClick={addTable}
-            data-ocid="invoice.add_table_button"
-            className="no-print hidden sm:flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-600 px-3 py-1.5 rounded border border-gray-200 hover:border-blue-300 transition-colors"
+            onClick={() => setDarkMode((d) => !d)}
+            data-ocid="invoice.dark_mode_toggle"
+            className="no-print w-8 h-8 rounded-full flex items-center justify-center bg-white/10 hover:bg-white/20 transition-colors"
+            title={darkMode ? "Light mode" : "Dark mode"}
           >
-            <Plus className="w-3.5 h-3.5" /> Add Table
+            {darkMode ? (
+              <Sun className="w-4 h-4 text-yellow-300" />
+            ) : (
+              <Moon className="w-4 h-4 text-white" />
+            )}
           </button>
-          {/* Print button */}
+
+          <div className="h-5 w-px bg-white/20" />
+
+          {/* Quick actions */}
           <button
             type="button"
-            onClick={() => window.print()}
-            className="no-print hidden sm:flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 px-3 py-1.5 rounded border border-gray-200 hover:border-gray-400 transition-colors"
-            title="Print Invoice"
+            onClick={handleSave}
+            data-ocid="invoice.save_button"
+            className="no-print hidden sm:flex items-center gap-1.5 text-white/80 hover:text-white text-sm px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+          >
+            <Save className="w-3.5 h-3.5" /> Save
+          </button>
+          <button
+            type="button"
+            onClick={handlePrint}
             data-ocid="invoice.print_button"
+            className="no-print hidden sm:flex items-center gap-1.5 text-white/80 hover:text-white text-sm px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
           >
             <Printer className="w-3.5 h-3.5" />
             <span className="hidden md:inline">Print</span>
           </button>
-          {/* Mobile: toggle sidebar */}
           <button
             type="button"
-            onClick={() => setShowMobileSidebar((v) => !v)}
-            className="lg:hidden p-1.5 rounded hover:bg-gray-100 transition-colors text-gray-600"
-            data-ocid="invoice.sidebar_toggle"
-          >
-            <Monitor className="w-4 h-4" />
-          </button>
-          <Button
-            onClick={handleExport}
+            onClick={handleDownloadPDF}
             disabled={isExporting}
-            data-ocid="invoice.export_button"
-            className="no-print gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+            data-ocid="invoice.download_pdf_button"
+            className="no-print flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg font-medium transition-colors"
+            style={{ background: "rgba(255,255,255,0.15)", color: "white" }}
           >
             {isExporting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
-              <Download className="w-4 h-4" />
+              <Download className="w-3.5 h-3.5" />
             )}
-            <span className="hidden sm:inline">
-              Export {exportFormat.toUpperCase()}
-            </span>
-            <span className="sm:hidden">Export</span>
-          </Button>
+            <span className="hidden md:inline">PDF</span>
+          </button>
         </div>
       </header>
 
-      {/* Body */}
-      <div className="flex flex-1 overflow-hidden relative">
-        {/* Main content: scrollable invoice */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">
-          <div
-            id="invoice-preview"
-            className="bg-white w-full max-w-[794px] mx-auto p-8 md:p-10 shadow-md rounded"
-          >
-            <InvoiceHeader data={header} onChange={setHeader} />
-
-            {tables.map((table) => (
-              <DynamicTable
-                key={table.id}
-                tableData={table}
-                onChange={(updated) => updateTable(table.id, updated)}
-                onRemove={() => removeTable(table.id)}
-              />
-            ))}
-
-            {tables.length === 0 && (
-              <div
-                className="border-2 border-dashed border-gray-200 rounded-lg p-8 text-center text-gray-400 text-sm mb-6"
-                data-ocid="invoice.tables.empty_state"
+      {/* ── Body ── */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* ── Left Sidebar ── */}
+        <aside
+          className="no-print hidden lg:flex w-[240px] flex-col flex-shrink-0 border-r"
+          style={{
+            background: darkMode ? "#1F2937" : "#FFFFFF",
+            borderColor: darkMode ? "#374151" : "#E5E7EB",
+          }}
+        >
+          <nav className="p-4 flex flex-col gap-1 mt-2">
+            {navItems.map(({ id, icon: Icon, label }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => handleNavClick(id)}
+                data-ocid={`invoice.nav_${id}_link`}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left w-full ${
+                  activeNav === id
+                    ? "text-white"
+                    : darkMode
+                      ? "text-gray-400 hover:text-white hover:bg-gray-700"
+                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                }`}
+                style={
+                  activeNav === id
+                    ? {
+                        background: "linear-gradient(135deg, #0B1F3A, #0A2A55)",
+                      }
+                    : {}
+                }
               >
-                No tables yet. Click &quot;Add Table&quot; to add one.
-              </div>
-            )}
+                <Icon className="w-4 h-4 flex-shrink-0" />
+                {label}
+              </button>
+            ))}
+          </nav>
 
-            <TotalsSection subtotal={subtotal} />
+          <Separator className={darkMode ? "bg-gray-700" : "bg-gray-100"} />
 
-            <div className="mt-4">
-              <p className="text-xs text-gray-500 mb-1 font-medium">
-                Notes / Terms
+          <nav className="p-4 flex flex-col gap-1">
+            {[
+              {
+                icon: Home,
+                label: "Dashboard",
+                action: () => router.navigate({ to: "/" }),
+              },
+              { icon: Users, label: "Customers" },
+              { icon: BarChart2, label: "Reports" },
+            ].map(({ icon: Icon, label, action }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={action}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left w-full ${
+                  darkMode
+                    ? "text-gray-400 hover:text-white hover:bg-gray-700"
+                    : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                }`}
+              >
+                <Icon className="w-4 h-4 flex-shrink-0" />
+                {label}
+              </button>
+            ))}
+          </nav>
+
+          <div className="mt-auto p-4">
+            <div
+              className="rounded-xl p-3 text-xs"
+              style={{
+                background: darkMode ? "#374151" : "#F3F6FA",
+                color: darkMode ? "#9CA3AF" : "#6B7280",
+              }}
+            >
+              <p
+                className="font-semibold mb-1"
+                style={{ color: darkMode ? "#D1D5DB" : "#374151" }}
+              >
+                GST Invoice Pro
               </p>
-              <Textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                data-ocid="invoice.notes_textarea"
-                placeholder="Payment terms, notes, or any additional information…"
-                className="text-sm text-gray-700 border-gray-200 resize-none min-h-20"
-                rows={3}
-              />
+              <p>Professional billing software for Indian businesses.</p>
+            </div>
+          </div>
+        </aside>
+
+        {/* ── Center: Invoice ── */}
+        <main
+          className="flex-1 overflow-y-auto p-4 md:p-6"
+          style={{ background: darkMode ? "#111827" : "#F3F6FA" }}
+        >
+          {/* Invoice Card */}
+          <div
+            id="inv-print-area"
+            ref={printAreaRef}
+            className="w-full max-w-3xl mx-auto rounded-xl p-8 md:p-10"
+            style={{
+              background: darkMode ? "#1F2937" : "#FFFFFF",
+              boxShadow: "0 6px 20px rgba(17,24,39,0.08)",
+            }}
+          >
+            {/* Invoice Title */}
+            <div className="mb-6">
+              {editingTitle ? (
+                <input
+                  ref={titleInputRef}
+                  type="text"
+                  value={invoice.title}
+                  onChange={(e) => setField("title", e.target.value)}
+                  onBlur={() => setEditingTitle(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") setEditingTitle(false);
+                  }}
+                  data-ocid="invoice.title_input"
+                  className="text-2xl font-bold outline-none border-b-2 border-blue-400 bg-transparent w-full"
+                  style={{ color: darkMode ? "#F9FAFB" : "#111827" }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setEditingTitle(true)}
+                  data-ocid="invoice.title_heading"
+                  className="group flex items-center gap-2 text-left"
+                >
+                  <h1
+                    className="text-2xl font-bold uppercase tracking-wide"
+                    style={{ color: darkMode ? "#F9FAFB" : "#111827" }}
+                  >
+                    {invoice.title}
+                  </h1>
+                  <Pencil
+                    className="no-print w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ color: darkMode ? "#60A5FA" : "#3B82F6" }}
+                  />
+                </button>
+              )}
             </div>
 
-            <div className="mt-8 pt-4 border-t border-gray-100 text-center text-xs text-gray-400">
+            {/* Company + Invoice Meta */}
+            <div className="flex gap-8 mb-8">
+              {/* Company Left */}
+              <div className="flex-1">
+                {/* Logo */}
+                <div className="mb-4">
+                  {invoice.companyLogo ? (
+                    <div className="relative inline-block">
+                      <button
+                        type="button"
+                        onClick={() => logoInputRef.current?.click()}
+                        className="block"
+                      >
+                        <img
+                          src={invoice.companyLogo}
+                          alt="Logo"
+                          className="h-16 w-auto object-contain rounded"
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setField("companyLogo", null)}
+                        className="no-print absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600"
+                        data-ocid="invoice.remove_logo_button"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => logoInputRef.current?.click()}
+                      data-ocid="invoice.upload_logo_button"
+                      className="no-print border-2 border-dashed rounded-lg px-4 py-2 text-xs transition-colors"
+                      style={{
+                        borderColor: darkMode ? "#4B5563" : "#E5E7EB",
+                        color: darkMode ? "#6B7280" : "#9CA3AF",
+                      }}
+                    >
+                      + Upload Logo
+                    </button>
+                  )}
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleLogoUpload}
+                  />
+                </div>
+
+                <EditableText
+                  value={invoice.companyName}
+                  onChange={(v) => setField("companyName", v)}
+                  placeholder="Company Name"
+                  className={`text-base font-bold uppercase mb-1 ${
+                    darkMode ? "text-gray-100" : "text-gray-800"
+                  }`}
+                />
+                <EditableText
+                  value={invoice.companyAddress}
+                  onChange={(v) => setField("companyAddress", v)}
+                  placeholder="Company Address"
+                  multiline
+                  className={`text-sm mb-1 ${
+                    darkMode ? "text-gray-400" : "text-gray-600"
+                  }`}
+                />
+                <EditableText
+                  value={invoice.companyGSTIN}
+                  onChange={(v) => setField("companyGSTIN", v)}
+                  placeholder="GSTIN"
+                  className={`text-xs mb-0.5 ${
+                    darkMode ? "text-gray-500" : "text-gray-500"
+                  }`}
+                />
+                <EditableText
+                  value={invoice.companyEmail}
+                  onChange={(v) => setField("companyEmail", v)}
+                  placeholder="Email"
+                  className={`text-xs mb-0.5 ${
+                    darkMode ? "text-gray-500" : "text-gray-500"
+                  }`}
+                />
+                <EditableText
+                  value={invoice.companyPhone}
+                  onChange={(v) => setField("companyPhone", v)}
+                  placeholder="Phone"
+                  className={`text-xs ${
+                    darkMode ? "text-gray-500" : "text-gray-500"
+                  }`}
+                />
+              </div>
+
+              {/* Invoice Meta Right */}
+              <div className="w-56 flex-shrink-0">
+                <div className="space-y-2 mb-6">
+                  <div className="flex items-center justify-end gap-2">
+                    <span
+                      className="text-xs"
+                      style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+                    >
+                      #
+                    </span>
+                    <input
+                      type="text"
+                      value={invoice.invoiceNumber}
+                      onChange={(e) =>
+                        setField("invoiceNumber", e.target.value)
+                      }
+                      data-ocid="invoice.number_input"
+                      className="text-sm font-semibold bg-transparent outline-none border-b border-transparent focus:border-blue-300 text-right w-32 transition-colors"
+                      style={{ color: darkMode ? "#F9FAFB" : "#111827" }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <span
+                      className="text-xs"
+                      style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+                    >
+                      Date
+                    </span>
+                    <input
+                      type="date"
+                      value={invoice.date}
+                      onChange={(e) => setField("date", e.target.value)}
+                      data-ocid="invoice.date_input"
+                      className="text-sm bg-transparent outline-none border-b border-transparent focus:border-blue-300 text-right transition-colors"
+                      style={{ color: darkMode ? "#D1D5DB" : "#374151" }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <span
+                      className="text-xs whitespace-nowrap"
+                      style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+                    >
+                      Due Date
+                    </span>
+                    <input
+                      type="date"
+                      value={invoice.dueDate}
+                      onChange={(e) => setField("dueDate", e.target.value)}
+                      data-ocid="invoice.due_date_input"
+                      className="text-sm bg-transparent outline-none border-b border-transparent focus:border-blue-300 text-right transition-colors"
+                      style={{ color: darkMode ? "#D1D5DB" : "#374151" }}
+                    />
+                  </div>
+                </div>
+
+                {/* Bill To */}
+                <div>
+                  <p
+                    className="text-xs font-bold uppercase tracking-widest mb-2"
+                    style={{ color: darkMode ? "#6B7280" : "#6B7280" }}
+                  >
+                    Bill To
+                  </p>
+                  <EditableText
+                    value={invoice.customerName}
+                    onChange={(v) => setField("customerName", v)}
+                    placeholder="Customer Name"
+                    className={`text-sm font-semibold mb-1 ${
+                      darkMode ? "text-gray-200" : "text-gray-800"
+                    }`}
+                  />
+                  <EditableText
+                    value={invoice.customerAddress}
+                    onChange={(v) => setField("customerAddress", v)}
+                    placeholder="Customer Address"
+                    multiline
+                    className={`text-xs mb-1 ${
+                      darkMode ? "text-gray-400" : "text-gray-600"
+                    }`}
+                  />
+                  <EditableText
+                    value={invoice.customerGSTIN}
+                    onChange={(v) => setField("customerGSTIN", v)}
+                    placeholder="GSTIN"
+                    className={`text-xs ${
+                      darkMode ? "text-gray-500" : "text-gray-500"
+                    }`}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div
+              className="h-px mb-6"
+              style={{ background: darkMode ? "#374151" : "#E5E7EB" }}
+            />
+
+            {/* Items Table */}
+            <div className="mb-6 overflow-x-auto">
+              <table
+                className="w-full border-collapse"
+                style={{ minWidth: "500px" }}
+              >
+                <thead>
+                  <tr style={{ background: darkMode ? "#374151" : "#F1F3F6" }}>
+                    <th
+                      className="text-left py-2.5 px-3 text-xs font-bold uppercase tracking-wide w-8"
+                      style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+                    >
+                      #
+                    </th>
+                    <th
+                      className="text-left py-2.5 px-3 text-xs font-bold uppercase tracking-wide"
+                      style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+                    >
+                      Item Description
+                    </th>
+                    <th
+                      className="text-center py-2.5 px-3 text-xs font-bold uppercase tracking-wide w-20"
+                      style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+                    >
+                      Qty
+                    </th>
+                    <th
+                      className="text-right py-2.5 px-3 text-xs font-bold uppercase tracking-wide w-28"
+                      style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+                    >
+                      Rate
+                    </th>
+                    <th
+                      className="text-right py-2.5 px-3 text-xs font-bold uppercase tracking-wide w-28"
+                      style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+                    >
+                      Amount
+                    </th>
+                    <th className="no-print w-8" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoice.rows.map((row, idx) => (
+                    <tr
+                      key={row.id}
+                      data-ocid={`invoice.item.${idx + 1}`}
+                      className="transition-colors"
+                      style={{
+                        borderBottom: `1px solid ${darkMode ? "#374151" : "#F3F4F6"}`,
+                      }}
+                    >
+                      <td
+                        className="py-2 px-3 text-sm"
+                        style={{ color: darkMode ? "#6B7280" : "#9CA3AF" }}
+                      >
+                        {idx + 1}
+                      </td>
+                      <td className="py-1 px-1">
+                        <input
+                          type="text"
+                          value={row.item}
+                          onChange={(e) =>
+                            updateRow(row.id, "item", e.target.value)
+                          }
+                          data-ocid={`invoice.item_name_input.${idx + 1}`}
+                          className="item-input w-full px-2 py-1.5 text-sm bg-transparent outline-none rounded-md focus:ring-1 transition-all"
+                          style={{ color: darkMode ? "#E5E7EB" : "#111827" }}
+                          placeholder="Item description"
+                          onFocus={(e) => {
+                            (e.target as HTMLInputElement).style.background =
+                              darkMode ? "#374151" : "#EFF6FF";
+                          }}
+                          onBlur={(e) => {
+                            (e.target as HTMLInputElement).style.background =
+                              "transparent";
+                          }}
+                        />
+                      </td>
+                      <td className="py-1 px-1">
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={row.qty === 0 ? "" : row.qty}
+                          onChange={(e) =>
+                            updateRow(row.id, "qty", e.target.value)
+                          }
+                          data-ocid={`invoice.item_qty_input.${idx + 1}`}
+                          className="w-full px-2 py-1.5 text-sm text-center bg-transparent outline-none rounded-md focus:ring-1 transition-all"
+                          style={{ color: darkMode ? "#E5E7EB" : "#111827" }}
+                          placeholder="0"
+                          onFocus={(e) => {
+                            (e.target as HTMLInputElement).style.background =
+                              darkMode ? "#374151" : "#EFF6FF";
+                          }}
+                          onBlur={(e) => {
+                            (e.target as HTMLInputElement).style.background =
+                              "transparent";
+                          }}
+                        />
+                      </td>
+                      <td className="py-1 px-1">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={row.price === 0 ? "" : row.price}
+                          onChange={(e) =>
+                            updateRow(row.id, "price", e.target.value)
+                          }
+                          data-ocid={`invoice.item_price_input.${idx + 1}`}
+                          className="w-full px-2 py-1.5 text-sm text-right bg-transparent outline-none rounded-md focus:ring-1 transition-all"
+                          style={{ color: darkMode ? "#E5E7EB" : "#111827" }}
+                          placeholder="0.00"
+                          onFocus={(e) => {
+                            (e.target as HTMLInputElement).style.background =
+                              darkMode ? "#374151" : "#EFF6FF";
+                          }}
+                          onBlur={(e) => {
+                            (e.target as HTMLInputElement).style.background =
+                              "transparent";
+                          }}
+                        />
+                      </td>
+                      <td
+                        className="py-2 px-3 text-sm text-right font-medium"
+                        style={{ color: darkMode ? "#D1D5DB" : "#374151" }}
+                      >
+                        ₹{INR(row.qty * row.price)}
+                      </td>
+                      <td className="no-print py-2 px-1 text-center">
+                        <button
+                          type="button"
+                          onClick={() => deleteRow(row.id)}
+                          data-ocid={`invoice.item_delete_button.${idx + 1}`}
+                          className="w-6 h-6 flex items-center justify-center mx-auto rounded transition-colors hover:bg-red-50"
+                          title="Delete row"
+                        >
+                          <Trash2
+                            className="w-3.5 h-3.5"
+                            style={{ color: darkMode ? "#6B7280" : "#9CA3AF" }}
+                          />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+
+                  {invoice.rows.length === 0 && (
+                    <tr data-ocid="invoice.items.empty_state">
+                      <td
+                        colSpan={6}
+                        className="py-8 text-center text-sm"
+                        style={{ color: darkMode ? "#6B7280" : "#9CA3AF" }}
+                      >
+                        No items yet. Click "Add Row" to add items.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Add Row Button */}
+            <div className="mb-6">
+              <button
+                type="button"
+                onClick={addRow}
+                data-ocid="invoice.add_row_button"
+                className="no-print flex items-center gap-2 text-sm px-4 py-2 rounded-lg border transition-colors font-medium"
+                style={{
+                  borderColor: darkMode ? "#374151" : "#E5E7EB",
+                  color: darkMode ? "#60A5FA" : "#3B82F6",
+                  background: darkMode ? "transparent" : "transparent",
+                }}
+              >
+                <Plus className="w-4 h-4" /> Add Row
+              </button>
+            </div>
+
+            <div
+              className="h-px mb-6"
+              style={{ background: darkMode ? "#374151" : "#E5E7EB" }}
+            />
+
+            {/* Totals */}
+            <div className="flex justify-end mb-8">
+              <div className="w-72">
+                {/* Subtotal */}
+                <div className="flex justify-between py-2">
+                  <span
+                    className="text-sm"
+                    style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+                  >
+                    Subtotal
+                  </span>
+                  <span
+                    className="text-sm font-medium"
+                    style={{ color: darkMode ? "#D1D5DB" : "#374151" }}
+                  >
+                    ₹{INR(subtotal)}
+                  </span>
+                </div>
+
+                {/* GST Row */}
+                <div className="flex items-center justify-between py-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={invoice.gstEnabled}
+                      onCheckedChange={(v) => setField("gstEnabled", v)}
+                      data-ocid="invoice.gst_switch"
+                      className="no-print scale-75"
+                    />
+                    <span
+                      className="text-sm"
+                      style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+                    >
+                      GST {invoice.gstRate}%
+                    </span>
+                  </div>
+                  <span
+                    className="text-sm font-medium"
+                    style={{
+                      color: invoice.gstEnabled
+                        ? darkMode
+                          ? "#D1D5DB"
+                          : "#374151"
+                        : darkMode
+                          ? "#4B5563"
+                          : "#D1D5DB",
+                    }}
+                  >
+                    {invoice.gstEnabled ? `₹${INR(gstAmount)}` : "—"}
+                  </span>
+                </div>
+
+                {/* Manual Adjustment */}
+                <div className="flex items-center justify-between py-2">
+                  <span
+                    className="text-sm"
+                    style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+                  >
+                    Adjustment (+/-)
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span
+                      className="text-sm"
+                      style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+                    >
+                      ₹
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={invoice.adjustment === 0 ? "" : invoice.adjustment}
+                      onChange={(e) =>
+                        setField("adjustment", parseAdjust(e.target.value))
+                      }
+                      data-ocid="invoice.adjustment_input"
+                      placeholder="0.00"
+                      className="w-24 text-sm text-right bg-transparent outline-none border-b border-transparent focus:border-blue-300 transition-colors"
+                      style={{
+                        color:
+                          invoice.adjustment < 0
+                            ? "#EF4444"
+                            : darkMode
+                              ? "#D1D5DB"
+                              : "#374151",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div
+                  className="h-px my-2"
+                  style={{ background: darkMode ? "#374151" : "#E5E7EB" }}
+                />
+
+                {/* Grand Total */}
+                <div className="flex justify-between py-2">
+                  <span
+                    className="text-base font-bold"
+                    style={{ color: darkMode ? "#F9FAFB" : "#111827" }}
+                  >
+                    Grand Total
+                  </span>
+                  <span
+                    className="text-lg font-bold"
+                    style={{
+                      background: "linear-gradient(135deg, #0B1F3A, #0A2A55)",
+                      WebkitBackgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                    }}
+                  >
+                    ₹{INR(grandTotal)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Notes + Terms */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div>
+                <p
+                  className="text-xs font-bold uppercase tracking-widest mb-2"
+                  style={{ color: darkMode ? "#6B7280" : "#6B7280" }}
+                >
+                  Notes
+                </p>
+                <textarea
+                  value={invoice.notes}
+                  onChange={(e) => setField("notes", e.target.value)}
+                  data-ocid="invoice.notes_textarea"
+                  placeholder="Payment terms, notes, or additional information…"
+                  rows={3}
+                  className="w-full text-sm bg-transparent resize-none outline-none border rounded-lg p-2 transition-colors"
+                  style={{
+                    color: darkMode ? "#D1D5DB" : "#4B5563",
+                    borderColor: darkMode ? "#374151" : "#E5E7EB",
+                  }}
+                />
+              </div>
+              <div>
+                <p
+                  className="text-xs font-bold uppercase tracking-widest mb-2"
+                  style={{ color: darkMode ? "#6B7280" : "#6B7280" }}
+                >
+                  Terms &amp; Conditions
+                </p>
+                <textarea
+                  value={invoice.terms}
+                  onChange={(e) => setField("terms", e.target.value)}
+                  data-ocid="invoice.terms_textarea"
+                  placeholder="Terms and conditions…"
+                  rows={3}
+                  className="w-full text-sm bg-transparent resize-none outline-none border rounded-lg p-2 transition-colors"
+                  style={{
+                    color: darkMode ? "#D1D5DB" : "#4B5563",
+                    borderColor: darkMode ? "#374151" : "#E5E7EB",
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Thank you footer */}
+            <div
+              className="text-center text-xs pt-4 border-t"
+              style={{
+                color: darkMode ? "#4B5563" : "#9CA3AF",
+                borderColor: darkMode ? "#374151" : "#F3F4F6",
+              }}
+            >
               Thank you for your business!
             </div>
           </div>
 
           {/* Caffeine footer */}
-          <div className="no-print text-center text-xs text-gray-400 mt-6 pb-4">
+          <div
+            className="no-print text-center text-xs mt-6 pb-4"
+            style={{ color: darkMode ? "#4B5563" : "#9CA3AF" }}
+          >
             © {new Date().getFullYear()}.{" "}
             <a
               href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-gray-600 transition-colors"
+              className="hover:underline"
             >
               Built with ❤️ using caffeine.ai
             </a>
           </div>
         </main>
 
-        {/* Desktop Right Sidebar */}
-        <aside className="hidden lg:flex w-72 bg-white border-l border-gray-200 p-5 flex-col gap-5 overflow-y-auto">
-          <ExportSidebarContent />
-        </aside>
-
-        {/* Mobile Sidebar Overlay */}
-        {showMobileSidebar && (
-          <button
-            type="button"
-            className="lg:hidden fixed inset-0 z-30 bg-transparent border-0 p-0 cursor-default"
-            onClick={() => setShowMobileSidebar(false)}
-            onKeyDown={(e) => e.key === "Escape" && setShowMobileSidebar(false)}
-            aria-label="Close sidebar"
-          >
-            <dialog
-              open
-              className="absolute right-0 top-0 h-full w-72 bg-white border-l border-gray-200 p-5 flex flex-col gap-5 overflow-y-auto shadow-xl m-0 max-h-none max-w-none"
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => e.stopPropagation()}
+        {/* ── Right: Actions Panel ── */}
+        <aside
+          className="no-print hidden xl:flex w-[300px] flex-shrink-0 flex-col border-l overflow-y-auto"
+          style={{
+            background: darkMode ? "#1F2937" : "#FFFFFF",
+            borderColor: darkMode ? "#374151" : "#E5E7EB",
+          }}
+        >
+          <div className="p-5 flex flex-col gap-4 sticky top-0">
+            <h2
+              className="text-lg font-bold"
+              style={{ color: darkMode ? "#F9FAFB" : "#111827" }}
             >
-              <ExportSidebarContent />
-            </dialog>
-          </button>
-        )}
+              Actions
+            </h2>
+
+            {/* Save Invoice — Primary */}
+            <Button
+              onClick={handleSave}
+              data-ocid="invoice.actions_save_button"
+              className="w-full h-11 text-sm font-medium rounded-xl gap-2"
+              style={{
+                background: "linear-gradient(135deg, #0B1F3A, #0A2A55)",
+                color: "white",
+                border: "none",
+              }}
+            >
+              <Save className="w-4 h-4" /> Save Invoice
+            </Button>
+
+            {/* Load Invoices */}
+            <button
+              type="button"
+              onClick={() => {
+                setEntries(loadEntries());
+                setShowLoadModal(true);
+              }}
+              data-ocid="invoice.actions_load_button"
+              className="w-full h-11 text-sm font-medium rounded-xl border flex items-center justify-center gap-2 transition-colors"
+              style={{
+                borderColor: darkMode ? "#374151" : "#E5E7EB",
+                background: darkMode ? "transparent" : "#FFFFFF",
+                color: darkMode ? "#D1D5DB" : "#374151",
+              }}
+            >
+              <FolderOpen className="w-4 h-4" /> Load Invoices
+            </button>
+
+            {/* Download PDF */}
+            <button
+              type="button"
+              onClick={handleDownloadPDF}
+              disabled={isExporting}
+              data-ocid="invoice.actions_pdf_button"
+              className="w-full h-11 text-sm font-medium rounded-xl border flex items-center justify-center gap-2 transition-colors"
+              style={{
+                borderColor: darkMode ? "#374151" : "#E5E7EB",
+                background: darkMode ? "transparent" : "#FFFFFF",
+                color: darkMode ? "#D1D5DB" : "#374151",
+              }}
+            >
+              {isExporting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              Download PDF
+            </button>
+
+            {/* Print Invoice */}
+            <button
+              type="button"
+              onClick={handlePrint}
+              data-ocid="invoice.actions_print_button"
+              className="w-full h-11 text-sm font-medium rounded-xl border flex items-center justify-center gap-2 transition-colors"
+              style={{
+                borderColor: darkMode ? "#374151" : "#E5E7EB",
+                background: darkMode ? "transparent" : "#FFFFFF",
+                color: darkMode ? "#D1D5DB" : "#374151",
+              }}
+            >
+              <Printer className="w-4 h-4" /> Print Invoice
+            </button>
+
+            <Separator
+              style={{ background: darkMode ? "#374151" : "#F3F4F6" }}
+            />
+
+            {/* Dark Mode Toggle */}
+            <div className="flex items-center justify-between">
+              <span
+                className="text-sm"
+                style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+              >
+                Dark Mode
+              </span>
+              <Switch
+                checked={darkMode}
+                onCheckedChange={setDarkMode}
+                data-ocid="invoice.actions_dark_mode_switch"
+              />
+            </div>
+
+            <Separator
+              style={{ background: darkMode ? "#374151" : "#F3F4F6" }}
+            />
+
+            {/* Live totals summary */}
+            <div>
+              <p
+                className="text-xs font-bold uppercase tracking-widest mb-3"
+                style={{ color: darkMode ? "#6B7280" : "#9CA3AF" }}
+              >
+                Summary
+              </p>
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-sm">
+                  <span style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}>
+                    Subtotal
+                  </span>
+                  <span style={{ color: darkMode ? "#D1D5DB" : "#374151" }}>
+                    ₹{INR(subtotal)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}>
+                    GST {invoice.gstRate}%
+                  </span>
+                  <span style={{ color: darkMode ? "#D1D5DB" : "#374151" }}>
+                    {invoice.gstEnabled ? `₹${INR(gstAmount)}` : "—"}
+                  </span>
+                </div>
+                {invoice.adjustment !== 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}>
+                      Adjustment
+                    </span>
+                    <span
+                      style={{
+                        color:
+                          invoice.adjustment < 0
+                            ? "#EF4444"
+                            : darkMode
+                              ? "#D1D5DB"
+                              : "#374151",
+                      }}
+                    >
+                      {invoice.adjustment > 0 ? "+" : ""}₹
+                      {INR(Math.abs(invoice.adjustment))}
+                    </span>
+                  </div>
+                )}
+                <div
+                  className="flex justify-between text-sm font-bold pt-1.5 border-t"
+                  style={{ borderColor: darkMode ? "#374151" : "#E5E7EB" }}
+                >
+                  <span style={{ color: darkMode ? "#F9FAFB" : "#111827" }}>
+                    Grand Total
+                  </span>
+                  <span style={{ color: darkMode ? "#60A5FA" : "#0B1F3A" }}>
+                    ₹{INR(grandTotal)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <Separator
+              style={{ background: darkMode ? "#374151" : "#F3F4F6" }}
+            />
+
+            {/* Reset */}
+            <button
+              type="button"
+              onClick={handleReset}
+              data-ocid="invoice.actions_reset_button"
+              className="w-full h-11 text-sm font-medium rounded-xl border flex items-center justify-center gap-2 transition-colors"
+              style={{
+                borderColor: darkMode ? "#4B5563" : "#E5E7EB",
+                background: darkMode ? "transparent" : "#FFF5F5",
+                color: "#EF4444",
+              }}
+            >
+              <RotateCcw className="w-4 h-4" /> Reset Invoice
+            </button>
+          </div>
+        </aside>
       </div>
+
+      {/* ── Load Modal ── */}
+      <Dialog open={showLoadModal} onOpenChange={setShowLoadModal}>
+        <DialogContent
+          className="max-w-lg"
+          data-ocid="invoice.load_modal"
+          style={{
+            background: darkMode ? "#1F2937" : "#FFFFFF",
+            borderColor: darkMode ? "#374151" : "#E5E7EB",
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle style={{ color: darkMode ? "#F9FAFB" : "#111827" }}>
+              Saved Invoices
+            </DialogTitle>
+          </DialogHeader>
+
+          {entries.length === 0 ? (
+            <div
+              className="text-center text-sm py-10"
+              data-ocid="invoice.saved.empty_state"
+              style={{ color: darkMode ? "#6B7280" : "#9CA3AF" }}
+            >
+              No saved invoices yet.
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+              {entries.map((entry, i) => (
+                <div
+                  key={entry.id}
+                  data-ocid={`invoice.saved.item.${i + 1}`}
+                  className="flex items-center justify-between p-3 rounded-xl border transition-colors"
+                  style={{
+                    borderColor: darkMode ? "#374151" : "#E5E7EB",
+                    background: darkMode ? "#111827" : "#F9FAFB",
+                  }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className="text-sm font-medium truncate"
+                      style={{ color: darkMode ? "#F9FAFB" : "#111827" }}
+                    >
+                      {entry.data.title} — {entry.data.invoiceNumber}
+                    </p>
+                    <p
+                      className="text-xs mt-0.5"
+                      style={{ color: darkMode ? "#6B7280" : "#9CA3AF" }}
+                    >
+                      {new Date(entry.savedAt).toLocaleString()}
+                    </p>
+                    <p
+                      className="text-xs"
+                      style={{ color: darkMode ? "#6B7280" : "#9CA3AF" }}
+                    >
+                      {entry.data.companyName}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 ml-3 flex-shrink-0">
+                    <Button
+                      size="sm"
+                      onClick={() => handleLoad(entry)}
+                      data-ocid={`invoice.saved.load_button.${i + 1}`}
+                      className="text-xs h-8 px-3"
+                      style={{
+                        background: "linear-gradient(135deg, #0B1F3A, #0A2A55)",
+                        color: "white",
+                      }}
+                    >
+                      <RefreshCw className="w-3 h-3 mr-1" /> Load
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteEntry(entry.id)}
+                      data-ocid={`invoice.saved.delete_button.${i + 1}`}
+                      className="p-1.5 rounded-lg transition-colors"
+                      title="Delete"
+                      style={{ color: darkMode ? "#6B7280" : "#9CA3AF" }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
