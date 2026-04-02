@@ -14,6 +14,7 @@ import {
   FileText,
   FolderOpen,
   Home,
+  ImageIcon,
   Loader2,
   Moon,
   Pencil,
@@ -202,6 +203,8 @@ export default function InvoiceGenerator() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const printAreaRef = useRef<HTMLDivElement>(null);
+  const [autoSave, setAutoSave] = useState(false);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Dark mode class on html element
   useEffect(() => {
@@ -226,9 +229,10 @@ export default function InvoiceGenerator() {
     style.id = "inv-print-css";
     style.textContent = `
       @media print {
-        body > *:not(#inv-print-portal) { display: none !important; }
-        #inv-print-portal { display: block !important; }
-        #inv-print-area { width: 794px !important; box-shadow: none !important; background: white !important; }
+        body > * { visibility: hidden !important; }
+        #inv-print-portal { visibility: visible !important; display: block !important; }
+        #inv-print-portal * { visibility: visible !important; }
+        #inv-print-portal #inv-print-area { width: 794px !important; background: white !important; overflow: visible !important; height: auto !important; max-height: none !important; box-shadow: none !important; }
         .no-print { display: none !important; }
         @page { size: A4 portrait; margin: 12mm; }
       }
@@ -238,6 +242,19 @@ export default function InvoiceGenerator() {
       document.getElementById("inv-print-css")?.remove();
     };
   }, []);
+
+  // Auto-save effect
+  useEffect(() => {
+    if (!autoSave) return;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      saveEntry(invoice);
+      setEntries(loadEntries());
+    }, 1500);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [invoice, autoSave]);
 
   // ── Calculations (on every render) ────────────────────────────────────────
   const subtotal = invoice.rows.reduce((s, r) => s + r.qty * r.price, 0);
@@ -335,27 +352,37 @@ export default function InvoiceGenerator() {
 
     const wrapper = document.createElement("div");
     wrapper.style.cssText =
-      "position:fixed;top:-9999px;left:-9999px;width:794px;background:white;padding:40px;z-index:-1;";
+      "position:absolute;top:-9999px;left:-9999px;width:794px;background:white;padding:40px;box-sizing:border-box;";
     const clone = el.cloneNode(true) as HTMLElement;
     clone.style.cssText =
-      "width:714px;background:white;overflow:visible;height:auto;box-shadow:none;";
+      "width:714px;background:white;overflow:visible;height:auto;max-height:none;box-shadow:none;border-radius:0;";
+    // Remove no-print elements
     for (const n of Array.from(clone.querySelectorAll(".no-print"))) n.remove();
+    // Force all children to be visible and unclipped
+    for (const n of Array.from(clone.querySelectorAll<HTMLElement>("*"))) {
+      if (n.style.overflow === "hidden") n.style.overflow = "visible";
+      if (n.style.maxHeight) n.style.maxHeight = "none";
+    }
     wrapper.appendChild(clone);
     document.body.appendChild(wrapper);
 
+    // Wait for browser to fully render cloned content
+    await new Promise((r) => setTimeout(r, 200));
+
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const canvas = await (window as any).html2canvas(wrapper, {
         scale: 2,
         useCORS: true,
+        allowTaint: true,
         logging: false,
         backgroundColor: "#ffffff",
         width: 794,
         height: wrapper.scrollHeight,
         windowWidth: 794,
+        scrollY: 0,
+        scrollX: 0,
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { jsPDF } = (window as any).jspdf;
       const pdf = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
       const pageW = pdf.internal.pageSize.getWidth();
@@ -411,7 +438,60 @@ export default function InvoiceGenerator() {
       toast.success("PDF downloaded!", { id: "pdf" });
     } catch (e) {
       console.error(e);
-      toast.error("Export failed", { id: "pdf" });
+      toast.error("Export failed. Please try again.", { id: "pdf" });
+    } finally {
+      document.body.removeChild(wrapper);
+      setIsExporting(false);
+    }
+  };
+
+  // ── PNG Export ─────────────────────────────────────────────────────────────
+  const handleDownloadPNG = async () => {
+    const el = document.getElementById("inv-print-area");
+    if (!el) {
+      toast.error("Invoice area not found");
+      return;
+    }
+    setIsExporting(true);
+    toast.loading("Generating PNG…", { id: "png" });
+
+    const wrapper = document.createElement("div");
+    wrapper.style.cssText =
+      "position:absolute;top:-9999px;left:-9999px;width:794px;background:white;padding:40px;box-sizing:border-box;";
+    const clone = el.cloneNode(true) as HTMLElement;
+    clone.style.cssText =
+      "width:714px;background:white;overflow:visible;height:auto;max-height:none;box-shadow:none;border-radius:0;";
+    for (const n of Array.from(clone.querySelectorAll(".no-print"))) n.remove();
+    for (const n of Array.from(clone.querySelectorAll<HTMLElement>("*"))) {
+      if (n.style.overflow === "hidden") n.style.overflow = "visible";
+      if (n.style.maxHeight) n.style.maxHeight = "none";
+    }
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    try {
+      const canvas = await (window as any).html2canvas(wrapper, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        backgroundColor: "#ffffff",
+        width: 794,
+        height: wrapper.scrollHeight,
+        windowWidth: 794,
+        scrollY: 0,
+        scrollX: 0,
+      });
+      const link = document.createElement("a");
+      link.download = `${invoice.title.replace(/\s+/g, "-")}-${invoice.invoiceNumber}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+      toast.success("PNG downloaded!", { id: "png" });
+    } catch (e) {
+      console.error(e);
+      toast.error("PNG export failed.", { id: "png" });
     } finally {
       document.body.removeChild(wrapper);
       setIsExporting(false);
@@ -436,8 +516,12 @@ export default function InvoiceGenerator() {
     const clone = el.cloneNode(true) as HTMLElement;
     clone.id = "inv-print-area";
     clone.style.cssText =
-      "width:794px;background:white;overflow:visible;height:auto;box-shadow:none;padding:0;";
+      "width:794px;background:white;overflow:visible;height:auto;max-height:none;box-shadow:none;padding:0;";
     for (const n of Array.from(clone.querySelectorAll(".no-print"))) n.remove();
+    // Fix any overflow:hidden children
+    for (const n of Array.from(clone.querySelectorAll<HTMLElement>("*"))) {
+      if (n.style.overflow === "hidden") n.style.overflow = "visible";
+    }
     portal.innerHTML = "";
     portal.appendChild(clone);
     portal.style.display = "block";
@@ -544,6 +628,18 @@ export default function InvoiceGenerator() {
               <Download className="w-3.5 h-3.5" />
             )}
             <span className="hidden md:inline">PDF</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadPNG}
+            disabled={isExporting}
+            data-ocid="invoice.download_png_button"
+            className="no-print hidden md:flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg font-medium transition-colors"
+            style={{ background: "rgba(255,255,255,0.10)", color: "white" }}
+            title="Download PNG"
+          >
+            <ImageIcon className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">PNG</span>
           </button>
         </div>
       </header>
@@ -1317,6 +1413,27 @@ export default function InvoiceGenerator() {
               Download PDF
             </button>
 
+            {/* Download PNG */}
+            <button
+              type="button"
+              onClick={handleDownloadPNG}
+              disabled={isExporting}
+              data-ocid="invoice.actions_png_button"
+              className="w-full h-11 text-sm font-medium rounded-xl border flex items-center justify-center gap-2 transition-colors"
+              style={{
+                borderColor: darkMode ? "#374151" : "#E5E7EB",
+                background: darkMode ? "transparent" : "#FFFFFF",
+                color: darkMode ? "#D1D5DB" : "#374151",
+              }}
+            >
+              {isExporting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <ImageIcon className="w-4 h-4" />
+              )}
+              Download PNG
+            </button>
+
             {/* Print Invoice */}
             <button
               type="button"
@@ -1331,6 +1448,25 @@ export default function InvoiceGenerator() {
             >
               <Printer className="w-4 h-4" /> Print Invoice
             </button>
+
+            <Separator
+              style={{ background: darkMode ? "#374151" : "#F3F4F6" }}
+            />
+
+            {/* Auto Save Toggle */}
+            <div className="flex items-center justify-between">
+              <span
+                className="text-sm"
+                style={{ color: darkMode ? "#9CA3AF" : "#6B7280" }}
+              >
+                Auto Save
+              </span>
+              <Switch
+                checked={autoSave}
+                onCheckedChange={setAutoSave}
+                data-ocid="invoice.actions_auto_save_switch"
+              />
+            </div>
 
             <Separator
               style={{ background: darkMode ? "#374151" : "#F3F4F6" }}
